@@ -80,11 +80,16 @@ $ clashauto -l 5
 3.   168ms    新加坡 03
 4.   181ms    美国 01
 5.   205ms    台湾 02
+
+😼 ✈️ 请输入编号选择节点，回车默认 1，输入 q 退出：
 ```
 
+- `clashauto` 同 `clashctl auto`，可直接在终端内完成测速和切换，无需打开 `UI`。
 - `clashauto` 会自动选择延迟最低的节点并切换，无需打开 `UI`。
 - `clashauto -l N` 会按延迟从低到高列出前 `N` 个节点，随后可输入编号切换到对应节点。
 - 若自动识别到的策略组不符合预期，可使用 `clashauto -g "<group_name>"` 手动指定测速和切换的策略组。
+- 自动识别时会优先尝试名称包含 `GLOBAL`、`PROXY`、`节点`、`选择`、`代理`、`手动` 的 `select` 类型策略组；若仍无法匹配，则退回到可选节点最多的策略组。
+- 默认测速地址为 `https://www.gstatic.com/generate_204`，默认超时为 `5000ms`；如需调整，可在执行前临时覆盖环境变量：`CLASH_AUTO_TEST_URL=... CLASH_AUTO_TIMEOUT=... clashauto`
 
 ### Web 控制台
 
