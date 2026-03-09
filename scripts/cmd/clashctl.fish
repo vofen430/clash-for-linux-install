@@ -1,6 +1,7 @@
 set fn_arr \
 clashui \
 clashstatus \
+clashauto \
 clashsecret \
 clashtun \
 clashmixin \
@@ -37,6 +38,8 @@ function clashctl
             clashoff $argv
         case proxy
             clashproxy $argv
+        case auto
+            clashauto $argv
         case '*'
             clash"$suffix" $argv
     end

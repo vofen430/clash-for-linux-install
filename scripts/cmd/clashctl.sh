@@ -186,6 +186,323 @@ function clashui() {
     printf "\n"
 }
 
+_clash_api() {
+    _detect_ext_addr
+    clashstatus >&/dev/null || clashon >/dev/null
+
+    curl \
+        --silent \
+        --show-error \
+        --noproxy "*" \
+        --location \
+        -H "Authorization: Bearer $(_get_secret)" \
+        "$@"
+}
+
+_urlencode() {
+    local LC_ALL=C
+    local input=$1
+    local output=
+    local i char
+
+    for ((i = 0; i < ${#input}; i++)); do
+        char=${input:i:1}
+        case $char in
+        [a-zA-Z0-9.~_-])
+            output+="$char"
+            ;;
+        *)
+            printf -v char '%%%02X' "'$char"
+            output+="$char"
+            ;;
+        esac
+    done
+
+    printf '%s' "$output"
+}
+
+_json_escape() {
+    local value=$1
+    value=${value//\\/\\\\}
+    value=${value//\"/\\\"}
+    value=${value//$'\n'/\\n}
+    value=${value//$'\r'/\\r}
+    value=${value//$'\t'/\\t}
+    printf '%s' "$value"
+}
+
+_clashauto_get_leaf_proxies() {
+    "$BIN_YQ" -r '.proxies[]?.name' "$CLASH_CONFIG_RUNTIME" 2>/dev/null
+}
+
+_clashauto_get_select_groups() {
+    "$BIN_YQ" -r '.proxy-groups[]? | select(.type == "select") | .name' "$CLASH_CONFIG_RUNTIME" 2>/dev/null
+}
+
+_clashauto_get_group_proxies() {
+    local group_name=$1
+    GROUP_NAME="$group_name" "$BIN_YQ" -r '.proxy-groups[]? | select(.name == strenv(GROUP_NAME)) | .proxies[]?' "$CLASH_CONFIG_RUNTIME" 2>/dev/null
+}
+
+_clashauto_get_group_leaf_candidates() {
+    local group_name=$1
+    local leaf_proxy_file=$2
+    local candidate
+
+    while IFS= read -r candidate; do
+        grep -Fx -- "$candidate" "$leaf_proxy_file" >/dev/null && printf '%s\n' "$candidate"
+    done < <(_clashauto_get_group_proxies "$group_name")
+}
+
+_clashauto_count_group_candidates() {
+    local group_name=$1
+    local leaf_proxy_file=$2
+    local count
+
+    count=$(_clashauto_get_group_leaf_candidates "$group_name" "$leaf_proxy_file" | wc -l)
+    printf '%s' "${count// /}"
+}
+
+_clashauto_find_group() {
+    local explicit_group=$1
+    local leaf_proxy_file=$2
+    local group_name best_group=
+    local count best_count=0
+    local pattern
+    local groups=()
+
+    [ -n "$explicit_group" ] && {
+        count=$(_clashauto_count_group_candidates "$explicit_group" "$leaf_proxy_file")
+        [ "$count" -gt 0 ] && {
+            printf '%s' "$explicit_group"
+            return 0
+        }
+        return 1
+    }
+
+    mapfile -t groups < <(_clashauto_get_select_groups)
+    [ "${#groups[@]}" -eq 0 ] && return 1
+
+    for pattern in 'GLOBAL|global|PROXY|Proxy' '节点' '选择' '代理' '手动'; do
+        for group_name in "${groups[@]}"; do
+            [[ $group_name =~ $pattern ]] || continue
+            count=$(_clashauto_count_group_candidates "$group_name" "$leaf_proxy_file")
+            [ "$count" -gt 0 ] && {
+                printf '%s' "$group_name"
+                return 0
+            }
+        done
+    done
+
+    for group_name in "${groups[@]}"; do
+        count=$(_clashauto_count_group_candidates "$group_name" "$leaf_proxy_file")
+        [ "$count" -gt "$best_count" ] && {
+            best_count=$count
+            best_group=$group_name
+        }
+    done
+
+    [ -n "$best_group" ] && printf '%s' "$best_group"
+}
+
+_clashauto_probe_proxy() {
+    local proxy_name=$1
+    local test_url=$2
+    local timeout_ms=$3
+    local output_file=$4
+    local response delay
+    local encoded_proxy=$(_urlencode "$proxy_name")
+
+    response=$(
+        _clash_api \
+            --get \
+            --data-urlencode "url=$test_url" \
+            --data-urlencode "timeout=$timeout_ms" \
+            "http://${EXT_IP}:${EXT_PORT}/proxies/${encoded_proxy}/delay"
+    ) || return 1
+
+    delay=$(sed -n 's/.*"delay":[[:space:]]*\([0-9][0-9]*\).*/\1/p' <<<"$response")
+    [ -n "$delay" ] || return 1
+
+    printf '%s\t%s\n' "$delay" "$proxy_name" >"$output_file"
+}
+
+_clashauto_switch_proxy() {
+    local group_name=$1
+    local proxy_name=$2
+    local encoded_group=$(_urlencode "$group_name")
+    local payload
+    local status_code
+
+    payload=$(printf '{"name":"%s"}' "$(_json_escape "$proxy_name")")
+    status_code=$(
+        _clash_api \
+            --request PUT \
+            --output /dev/null \
+            --write-out '%{http_code}' \
+            -H "Content-Type: application/json" \
+            --data "$payload" \
+            "http://${EXT_IP}:${EXT_PORT}/proxies/${encoded_group}"
+    ) || return 1
+
+    [ "$status_code" = '204' ] || [ "$status_code" = '200' ]
+}
+
+function clashauto() {
+    local list_limit=0
+    local target_group=
+    local arg
+
+    while (($#)); do
+        arg=$1
+        case $arg in
+        -h | --help)
+            cat <<EOF
+
+- 自动选择延迟最低的节点
+  clashauto
+
+- 列出前 N 个最低延迟节点，并按编号选择
+  clashauto -l <N>
+
+- 指定策略组测速并切换
+  clashauto -g <group_name>
+
+EOF
+            return 0
+            ;;
+        -l | --list)
+            shift
+            [[ $1 =~ ^[1-9][0-9]*$ ]] || {
+                _failcat "请为 -l 指定大于 0 的数字"
+                return 1
+            }
+            list_limit=$1
+            ;;
+        -g | --group)
+            shift
+            [ -n "$1" ] || {
+                _failcat "请为 -g 指定策略组名称"
+                return 1
+            }
+            target_group=$1
+            ;;
+        *)
+            _failcat "未知参数：$arg"
+            return 1
+            ;;
+        esac
+        shift
+    done
+
+    _detect_ext_addr
+    clashstatus >&/dev/null || clashon >/dev/null
+
+    local tmp_dir leaf_proxy_file
+    tmp_dir=$(mktemp -d) || {
+        _failcat '无法创建临时目录'
+        return 1
+    }
+    leaf_proxy_file="${tmp_dir}/leaf-proxies.txt"
+    _clashauto_get_leaf_proxies >"$leaf_proxy_file"
+    [ -s "$leaf_proxy_file" ] || {
+        rm -rf "$tmp_dir"
+        _failcat '当前配置中没有可测速的节点'
+        return 1
+    }
+
+    target_group=$(_clashauto_find_group "$target_group" "$leaf_proxy_file") || {
+        rm -rf "$tmp_dir"
+        _failcat '未找到可切换的策略组，可通过 clashauto -g <group_name> 手动指定'
+        return 1
+    }
+
+    local candidates=()
+    mapfile -t candidates < <(_clashauto_get_group_leaf_candidates "$target_group" "$leaf_proxy_file")
+    [ "${#candidates[@]}" -gt 0 ] || {
+        rm -rf "$tmp_dir"
+        _failcat "策略组 [$target_group] 中没有可切换的节点"
+        return 1
+    }
+
+    local test_url=${CLASH_AUTO_TEST_URL:-https://www.gstatic.com/generate_204}
+    local timeout_ms=${CLASH_AUTO_TIMEOUT:-5000}
+    local index
+    local pids=()
+
+    _okcat '📡' "策略组：$target_group，正在测速 ${#candidates[@]} 个节点..."
+    for index in "${!candidates[@]}"; do
+        _clashauto_probe_proxy "${candidates[$index]}" "$test_url" "$timeout_ms" "${tmp_dir}/${index}.delay" &
+        pids+=("$!")
+    done
+    for index in "${!pids[@]}"; do
+        wait "${pids[$index]}"
+    done
+
+    local ranked_results=()
+    mapfile -t ranked_results < <(
+        find "$tmp_dir" -maxdepth 1 -name '*.delay' -type f -exec cat {} + 2>/dev/null |
+            sort -n -k1,1
+    )
+    [ "${#ranked_results[@]}" -gt 0 ] || {
+        rm -rf "$tmp_dir"
+        _failcat "测速失败，请检查节点是否可用或调整 CLASH_AUTO_TEST_URL"
+        return 1
+    }
+
+    local selected_index=0
+    if ((list_limit > 0)); then
+        local max_count=$list_limit
+        [ "$max_count" -gt "${#ranked_results[@]}" ] && max_count=${#ranked_results[@]}
+
+        printf "\n"
+        printf "%-4s %-8s %s\n" '序号' '延迟' '节点'
+        for ((index = 0; index < max_count; index++)); do
+            IFS=$'\t' read -r delay proxy_name <<<"${ranked_results[$index]}"
+            printf "%-4s %-8s %s\n" "$((index + 1))." "${delay}ms" "$proxy_name"
+        done
+        printf "\n"
+
+        local selection
+        echo -n "$(_okcat '✈️ ' '请输入编号选择节点，回车默认 1，输入 q 退出：')"
+        read -r selection
+        case $selection in
+        '' | 1)
+            selected_index=0
+            ;;
+        q | Q)
+            rm -rf "$tmp_dir"
+            _okcat '已取消切换'
+            return 0
+            ;;
+        *)
+            [[ $selection =~ ^[1-9][0-9]*$ ]] || {
+                rm -rf "$tmp_dir"
+                _failcat '请输入有效编号'
+                return 1
+            }
+            [ "$selection" -le "$max_count" ] || {
+                rm -rf "$tmp_dir"
+                _failcat "编号超出范围，请输入 1 到 $max_count"
+                return 1
+            }
+            selected_index=$((selection - 1))
+            ;;
+        esac
+    fi
+
+    local selected_delay selected_proxy
+    IFS=$'\t' read -r selected_delay selected_proxy <<<"${ranked_results[$selected_index]}"
+    _clashauto_switch_proxy "$target_group" "$selected_proxy" || {
+        rm -rf "$tmp_dir"
+        _failcat "节点切换失败：$selected_proxy"
+        return 1
+    }
+
+    rm -rf "$tmp_dir"
+    _okcat '🚀' "已切换策略组 [$target_group] -> $selected_proxy (${selected_delay}ms)"
+}
+
 _merge_config() {
     cat "$CLASH_CONFIG_RUNTIME" >"$CLASH_CONFIG_TEMP" 2>/dev/null
     # shellcheck disable=SC2016
@@ -698,6 +1015,10 @@ function clashctl() {
         shift
         clashsecret "$@"
         ;;
+    auto)
+        shift
+        clashauto "$@"
+        ;;
     sub)
         shift
         clashsub "$@"
@@ -727,6 +1048,7 @@ Commands:
   ui                    面板地址
   sub                   订阅管理
   log                   内核日志
+  auto                  自动优选节点
   tun                   Tun 模式
   mixin                 Mixin 配置
   secret                Web 密钥
