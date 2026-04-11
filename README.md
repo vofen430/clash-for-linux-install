@@ -13,6 +13,7 @@
 - 适配主流 `Linux` 发行版，并兼容 `AutoDL` 等容器化环境。
 - 自动检测端口占用情况，在冲突时随机分配可用端口。
 - 自动识别系统架构与初始化系统，下载匹配的内核与依赖，并生成对应的服务管理配置。
+- 默认提供纯 `CLI` 使用方式，不包含 `Web UI` 面板资源。
 - 在需要时调用 [subconverter](https://github.com/tindy2013/subconverter) 进行本地订阅转换。
 
 ## 🚀 一键安装
@@ -40,9 +41,8 @@ Commands:
     off                   关闭代理
     status                内核状况
     proxy                 系统代理
-    ui                    Web 面板
     auto                  自动优选节点
-    secret                Web 密钥
+    secret                API 密钥
     sub                   订阅管理
     upgrade               升级内核
     tun                   Tun 模式
@@ -91,31 +91,18 @@ $ clashauto -l 5
 - 自动识别时会优先尝试名称包含 `GLOBAL`、`PROXY`、`节点`、`选择`、`代理`、`手动` 的 `select` 类型策略组；若仍无法匹配，则退回到可选节点最多的策略组。
 - 默认测速地址为 `https://www.gstatic.com/generate_204`，默认超时为 `5000ms`；如需调整，可在执行前临时覆盖环境变量：`CLASH_AUTO_TEST_URL=... CLASH_AUTO_TIMEOUT=... clashauto`
 
-### Web 控制台
+### API 密钥
 
 ```bash
-$ clashui
-╔═══════════════════════════════════════════════╗
-║                😼 Web 控制台                  ║
-║═══════════════════════════════════════════════║
-║                                               ║
-║     🔓 注意放行端口：9090                      ║
-║     🏠 内网：http://192.168.0.1:9090/ui       ║
-║     🌏 公网：http://8.8.8.8:9090/ui          ║
-║     ☁️ 公共：http://board.zash.run.place      ║
-║                                               ║
-╚═══════════════════════════════════════════════╝
-
 $ clashsecret mysecret
 😼 密钥更新成功，已重启生效
 
 $ clashsecret
-😼 当前密钥：mysecret
+😼 当前 API 密钥：mysecret
 ```
 
-- 可通过浏览器打开 `Web` 控制台进行可视化操作，例如切换节点、查看日志等。
-- 默认使用 [zashboard](https://github.com/Zephyruso/zashboard) 作为控制台前端，如需更换可自行配置。
-- 若需将控制台暴露到公网，建议定期更换访问密钥，或通过 `SSH` 端口转发方式进行安全访问。
+- `CLI` 命令会通过本地控制 API 与内核交互，例如自动优选节点、请求内核升级。
+- 默认监听 `127.0.0.1:9090`，仅限本机访问。
 
 ### `Mixin` 配置
 
@@ -202,7 +189,6 @@ bash uninstall.sh
 - [mihomo](https://github.com/MetaCubeX/mihomo)
 - [subconverter](https://github.com/tindy2013/subconverter)
 - [yq](https://github.com/mikefarah/yq)
-- [zashboard](https://github.com/Zephyruso/zashboard)
 
 ## ⭐ Star History
 

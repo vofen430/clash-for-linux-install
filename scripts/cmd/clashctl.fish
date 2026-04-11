@@ -1,5 +1,4 @@
 set fn_arr \
-clashui \
 clashstatus \
 clashauto \
 clashsecret \

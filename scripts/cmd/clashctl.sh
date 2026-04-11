@@ -163,29 +163,6 @@ function clashlog() {
     placeholder_log "$@"
 }
 
-function clashui() {
-    _detect_ext_addr
-    clashstatus >&/dev/null || clashon >/dev/null
-    local query_url='api64.ipify.org' # ifconfig.me
-    local public_ip=$(curl -s --noproxy "*" --location --max-time 2 $query_url)
-    local public_address="http://${public_ip:-公网}:${EXT_PORT}/ui"
-
-    local local_ip=$EXT_IP
-    local local_address="http://${local_ip}:${EXT_PORT}/ui"
-    printf "\n"
-    printf "╔═══════════════════════════════════════════════╗\n"
-    printf "║                %s                  ║\n" "$(_okcat 'Web 控制台')"
-    printf "║═══════════════════════════════════════════════║\n"
-    printf "║                                               ║\n"
-    printf "║     🔓 注意放行端口：%-5s                    ║\n" "$EXT_PORT"
-    printf "║     🏠 内网：%-31s  ║\n" "$local_address"
-    printf "║     🌏 公网：%-31s  ║\n" "$public_address"
-    printf "║     ☁️  公共：%-31s  ║\n" "$URL_CLASH_UI"
-    printf "║                                               ║\n"
-    printf "╚═══════════════════════════════════════════════╝\n"
-    printf "\n"
-}
-
 _clash_api() {
     _detect_ext_addr
     clashstatus >&/dev/null || clashon >/dev/null
@@ -590,10 +567,10 @@ function clashsecret() {
     -h | --help)
         cat <<EOF
 
-- 查看 Web 密钥
+ - 查看 API 密钥
   clashsecret
 
-- 修改 Web 密钥
+ - 修改 API 密钥
   clashsecret <new_secret>
 
 EOF
@@ -603,7 +580,7 @@ EOF
 
     case $# in
     0)
-        _okcat "当前密钥：$(_get_secret)"
+        _okcat "当前 API 密钥：$(_get_secret)"
         ;;
     1)
         "$BIN_YQ" -i ".secret = \"$1\"" "$CLASH_CONFIG_MIXIN" || {
@@ -987,10 +964,6 @@ function clashctl() {
         shift
         clashoff
         ;;
-    ui)
-        shift
-        clashui
-        ;;
     status)
         shift
         clashstatus "$@"
@@ -1045,13 +1018,12 @@ Commands:
   off                   关闭代理
   proxy                 系统代理
   status                内核状态
-  ui                    面板地址
   sub                   订阅管理
   log                   内核日志
   auto                  自动优选节点
   tun                   Tun 模式
   mixin                 Mixin 配置
-  secret                Web 密钥
+  secret                API 密钥
   upgrade               升级内核
 
 Global Options:

@@ -23,9 +23,7 @@ _apply_rc
 
 _merge_config
 _detect_proxy_port
-clashui
 clashsecret "$(_get_random_val)" >/dev/null
-clashsecret
 
 _okcat '🎉' 'enjoy 🎉'
 clashctl

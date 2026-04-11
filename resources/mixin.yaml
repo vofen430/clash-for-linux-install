@@ -4,9 +4,7 @@ _custom:
 
 mixed-port: 7890
 
-external-controller: "0.0.0.0:9090"
-external-ui: dist
-external-ui-url: https://github.com/Zephyruso/zashboard/releases/latest/download/dist.zip
+external-controller: "127.0.0.1:9090"
 secret:
 
 allow-lan: false # 若开启务必设置用户验证以防暴露公网后被滥用
@@ -18,7 +16,6 @@ authentication:
 # override：根据 name 匹配并替换原项
 rules:
   prefix:
-    - DOMAIN,api64.ipify.org,DIRECT # 用于 clashui 获取真实公网 IP
     # - DOMAIN-KEYWORD,github,proxy   # 用于 clashupgrade 升级内核
   suffix:
 
@@ -45,7 +42,6 @@ tun:
     - tcp://any:53
   strict-route: true
   route-exclude-address:
-    - 1.1.1.1/32 # 用于 clashui 获取真实内网 IP
     - 127.0.0.1/32
   exclude-interface:
     - docker0 # 避免无法访问容器内服务
